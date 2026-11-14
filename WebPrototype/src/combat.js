@@ -47,15 +47,21 @@
   class Attributes {
     constructor(opts) {
       opts = opts || {};
-      this.baseMaxHealth = opts.maxHealth || CONFIG.player.maxHealth;
-      this.baseMaxStamina = opts.maxStamina || CONFIG.player.maxStamina;
-      this.healthUpgrades = opts.healthUpgrades || 0;
-      this.weaponUpgrades = opts.weaponUpgrades || 0;
-      this.speedUpgrades = opts.speedUpgrades || 0;
-      this.health = opts.health != null ? opts.health : this.maxHealth;
-      this.stamina = opts.stamina != null ? opts.stamina : this.maxStamina;
+      const num = (v, d, lo, hi) => { const n = Number(v); return Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : d; };
+      this.baseMaxHealth = num(opts.maxHealth, CONFIG.player.maxHealth, 1, 10000);
+      this.baseMaxStamina = num(opts.maxStamina, CONFIG.player.maxStamina, 1, 10000);
+      this.healthUpgrades = Math.floor(num(opts.healthUpgrades, 0, 0, 3));
+      this.weaponUpgrades = Math.floor(num(opts.weaponUpgrades, 0, 0, 3));
+      this.speedUpgrades = Math.floor(num(opts.speedUpgrades, 0, 0, 2));
+      this.health = num(opts.health, this.maxHealth, 0, this.maxHealth);
+      this.stamina = num(opts.stamina, this.maxStamina, 0, this.maxStamina);
       this.invuln = 0; this.staminaDelay = 0; this.corruption = 0;
-      this.buffs = {}; this.dead = this.health <= 0;
+      this.buffs = {};
+      if (opts.buffs && typeof opts.buffs === 'object') {
+        for (const k of Object.keys(opts.buffs)) { const t = num(opts.buffs[k], 0, 0, 300); if (t > 0) this.buffs[k] = t; }
+      }
+      this.lanternEquipped = !!opts.lanternEquipped;
+      this.dead = this.health <= 0;
     }
     get maxHealth() { return this.baseMaxHealth + this.healthUpgrades * 20; }
     get maxStamina() { return this.baseMaxStamina; }
@@ -124,7 +130,8 @@
     serialize() {
       return {
         health: this.health, stamina: this.stamina,
-        healthUpgrades: this.healthUpgrades, weaponUpgrades: this.weaponUpgrades, speedUpgrades: this.speedUpgrades
+        healthUpgrades: this.healthUpgrades, weaponUpgrades: this.weaponUpgrades, speedUpgrades: this.speedUpgrades,
+        buffs: Object.assign({}, this.buffs), lanternEquipped: !!this.lanternEquipped
       };
     }
   }

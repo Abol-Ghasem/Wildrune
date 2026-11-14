@@ -26,6 +26,7 @@
       this.timeScale = 1; this.slowmo = 0; this.gatherTarget = null; this.gatherT = 0;
       this.nearForge = false; this.bossActive = false; this.endingReady = false;
       this.fpsSamples = []; this.frameCount = 0;
+      this.pointerFallback = false; this.fatal = null;
 
       const q = QUALITY[UI.settings.quality] || QUALITY.medium;
       this.renderer = new T.WebGLRenderer({ antialias: q.aa, powerPreference: 'high-performance' });
@@ -321,7 +322,7 @@
       for (const e of this.world.enemies) this.spawnEnemy(e.type, e.x, e.z, e.id);
       const b = this.landmarks.warden;
       this.boss = this.spawnEnemy('warden', b.x, b.z, 'warden', true);
-      this.boss.group.visible = false; this.boss.dormant = true;
+      this.boss.rig.group.visible = false; this.boss.dormant = true;
     },
     spawnEnemy(type, x, z, id, isBoss) {
       const def = ENEMIES[type];
@@ -367,8 +368,12 @@
       addEventListener('keydown', e => {
         if (e.repeat) return;
         const k = e.key.toLowerCase(); this.keys[k] = true;
-        if (['w', 'a', 's', 'd', ' ', 'shift', 'control', 'alt', 'e', 'i', 'c', 'j', 'q', '1', '2', '3', '4'].includes(k)) e.preventDefault();
+        if (['w', 'a', 's', 'd', ' ', 'shift', 'control', 'alt', 'e', 'i', 'c', 'j', 'q', '1', '2', '3', '4', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) e.preventDefault();
         if (this.state === 'playing') {
+          if (UI.openPanel) {
+            if (k === 'escape' || k === UI.openPanel[0] || (UI.openPanel === 'inventory' && k === 'i') || (UI.openPanel === 'crafting' && k === 'c') || (UI.openPanel === 'journal' && k === 'j')) this.togglePanel(UI.openPanel);
+            return;
+          }
           if (k === 'escape') this.pause();
           else if (k === 'i') this.togglePanel('inventory');
           else if (k === 'c') this.togglePanel('crafting');
@@ -386,14 +391,15 @@
       addEventListener('blur', () => { this.keys = {}; if (this.state === 'playing') this.pause(); });
       canvas.addEventListener('mousedown', e => {
         if (this.state !== 'playing') return;
-        if (document.pointerLockElement !== canvas) { canvas.requestPointerLock(); return; }
+        if (document.pointerLockElement !== canvas && !this.pointerFallback) { this.requestLookControl(); return; }
         if (UI.openPanel) return;
         if (e.button === 0) this.startAttack('light');
         else if (e.button === 2) this.startAttack('heavy');
       });
       canvas.addEventListener('contextmenu', e => e.preventDefault());
       addEventListener('mousemove', e => {
-        if (document.pointerLockElement !== canvas || this.state !== 'playing') return;
+        if (this.state !== 'playing' || UI.openPanel) return;
+        if (document.pointerLockElement !== canvas && !(this.pointerFallback && (e.buttons & 4))) return;
         const s = UI.settings.sens * 0.0022;
         this.camYaw -= e.movementX * s;
         this.camPitch += (UI.settings.invert ? -1 : 1) * e.movementY * s;
@@ -401,7 +407,7 @@
       });
       addEventListener('wheel', e => { if (this.state === 'playing') this.camDist = clamp(this.camDist + Math.sign(e.deltaY) * 0.6, 3.2, 10); }, { passive: true });
       document.addEventListener('pointerlockchange', () => {
-        if (document.pointerLockElement !== canvas && this.state === 'playing' && !UI.openPanel) this.pause();
+        if (document.pointerLockElement !== canvas && this.state === 'playing' && !UI.openPanel && !this.pointerFallback) this.pause();
       });
     },
     onResize() {
@@ -451,9 +457,14 @@
       this.nodeStates = (d.world && d.world.nodesTaken) || {};
       this.applyWorldState();
       const cp = d.player;
-      this.p.pos.set(cp.x, World.heightAt(cp.x, cp.z), cp.z);
+      if (this.attrs.dead || this.attrs.health <= 0) {
+        // A save written at the moment of death resumes at the waystone, not as a corpse.
+        this.attrs.dead = false; this.attrs.health = this.attrs.maxHealth; this.attrs.stamina = this.attrs.maxStamina;
+        this.p.pos.set(this.checkpoint.x, World.heightAt(this.checkpoint.x, this.checkpoint.z), this.checkpoint.z);
+      } else {
+        this.p.pos.set(cp.x, World.heightAt(cp.x, cp.z), cp.z);
+      }
       this.p.yaw = cp.facing || 0; this.camYaw = cp.facing || 0;
-      if (this.attrs.lanternEquipped || (d.attrs && d.attrs.lanternEquipped)) this.setLantern(true);
       this.attrs.lanternEquipped = !!(d.attrs && d.attrs.lanternEquipped);
       this.setLantern(this.attrs.lanternEquipped);
       UI.hide('menu'); this.beginPlay();
@@ -468,14 +479,40 @@
         e.rig.group.position.copy(e.pos);
         if (e.telegraphRing) { e.telegraphRing.visible = false; }
       }
-      if (this.boss) { this.boss.dormant = true; this.boss.group.visible = false; }
+      if (this.boss) {
+        this.boss.dormant = true; this.boss.rig.group.visible = false;
+        for (const s of this.boss.rig.parts.shards || []) s.material.color.setHex(0xc46bff);
+        if (this.boss.rig.parts.core) this.boss.rig.parts.core.material.color.setHex(0xc46bff);
+        for (const a of this.lightAnchors) if (a.owner === this.boss.rig.group) a.color = 0xc46bff;
+      }
       this.bossActive = false; this.endingReady = false; this.nova = null; this.novaMesh.visible = false;
-      for (const pr of this.projectiles) this.scene.remove(pr.mesh);
+      for (const pr of this.projectiles) { this.scene.remove(pr.mesh); pr.mesh.geometry.dispose(); pr.mesh.material.dispose(); }
       this.projectiles.length = 0;
+      for (const f of this.effects) { this.scene.remove(f.mesh); if (f.kind === 'ring') f.mesh.geometry.dispose(); f.mesh.material.dispose(); }
+      this.effects.length = 0;
       for (const n of this.world.nodes) { n.taken = false; n.respawn = 0; n.mesh.visible = true; }
+      for (const id of ['relic_forest', 'relic_cave', 'relic_ruins']) {
+        const l = this.landmarks[id];
+        if (l && l.mesh.userData.pickup) { l.mesh.userData.pickup.visible = true; if (l.mesh.userData.ring) l.mesh.userData.ring.visible = true; }
+      }
       const gate = this.landmarks.shrine_gate;
-      if (gate && gate.collider) { gate.mesh.userData.barrier.visible = true; gate.mesh.userData.runes.visible = true; }
-      UI.boss(null);
+      if (gate) {
+        gate.mesh.userData.barrier.visible = true; gate.mesh.userData.runes.visible = true;
+        if (!gate.collider) {
+          gate.collider = { x: gate.x, z: gate.z, r: 4.4, kind: 'gate' };
+          this.world.colliders.push(gate.collider); this.world.grid.add(gate.collider);
+        }
+      }
+      const heart = this.landmarks.heart;
+      if (heart && heart.mesh.userData.heart) {
+        heart.mesh.userData.heart.material.color.setHex(0xc46bff);
+        heart.mesh.userData.heart.material.emissive.setHex(0x5a1f80);
+        for (const a of this.lightAnchors) if (a.owner === heart.mesh) a.color = 0xc46bff;
+      }
+      if (this.shrineRing) this.shrineRing.material.color.setHex(0xc46bff);
+      this.keys = {}; this.gatherTarget = null; this.gatherT = 0; this._eLatch = false;
+      this.slowmo = 0; this.timeScale = 1; this.autosaveT = 0;
+      UI.boss(null); UI.gather(null); UI.prompt(null); UI.corruptFlash(false);
     },
     applyWorldState() {
       for (const n of this.world.nodes) if (this.nodeStates[n.id]) { n.taken = true; n.mesh.visible = false; n.respawn = 60; }
@@ -485,18 +522,33 @@
       }
       if (this.prog.flags.shrineOpen) this.openGateVisual();
       if (this.prog.bossDefeated) {
-        this.boss.alive = false; this.boss.dormant = true; this.boss.group.visible = false;
+        this.boss.alive = false; this.boss.dormant = true; this.boss.rig.group.visible = false;
         this.endingReady = true; this.setHeartCleansed();
       }
     },
     beginPlay() {
       this.state = 'playing';
+      this.playerRig.group.visible = true;
       UI.show('hud'); UI.hud(this.attrs, this.inv); UI.objective(this.prog.activeObjective());
       this.applyQuality(UI.settings.quality);
-      this.renderer.domElement.requestPointerLock();
+      this.requestLookControl();
       this.clock.last = performance.now();
       Audio.setRegion(World.regionAt(this.p.pos.x, this.p.pos.z));
       this.save(false);
+    },
+    /** Pointer lock is best-effort: embedded previews often deny it. Arrow keys always work. */
+    requestLookControl() {
+      const canvas = this.renderer.domElement;
+      if (!canvas.requestPointerLock) { this.enablePointerFallback(); return; }
+      try {
+        const r = canvas.requestPointerLock();
+        if (r && typeof r.catch === 'function') r.catch(() => this.enablePointerFallback());
+      } catch (e) { this.enablePointerFallback(); }
+    },
+    enablePointerFallback() {
+      if (this.pointerFallback) return;
+      this.pointerFallback = true;
+      UI.toast('Mouse lock unavailable — drag middle mouse or use arrow keys to look.', '');
     },
     pause() {
       if (this.state !== 'playing') return;
@@ -507,7 +559,7 @@
     },
     resume() {
       this.state = 'playing'; UI.hide('pause'); UI.hide('settings'); UI.hide('controls');
-      this.renderer.domElement.requestPointerLock(); this.clock.last = performance.now();
+      this.requestLookControl(); this.clock.last = performance.now();
     },
     quitToMenu() {
       if (this.state === 'playing' || this.state === 'paused') this.save(false);
@@ -517,10 +569,12 @@
     },
     togglePanel(name) {
       UI.togglePanel(name);
-      if (UI.openPanel) { document.exitPointerLock(); }
-      else if (this.state === 'playing') this.renderer.domElement.requestPointerLock();
+      if (UI.openPanel) {
+        this.keys = {}; this.gatherTarget = null; this.gatherT = 0; UI.gather(null);
+        document.exitPointerLock();
+      } else if (this.state === 'playing') this.requestLookControl();
     },
-    onPanelClosed() { if (this.state === 'playing') this.renderer.domElement.requestPointerLock(); },
+    onPanelClosed() { if (this.state === 'playing') this.requestLookControl(); },
 
     save(notify) {
       const state = {
@@ -695,13 +749,13 @@
       if (this.boss && this.boss.alive) {
         this.boss.hp = this.boss.maxHp; this.boss.brain = AI_makeBrain('warden', this.boss.home);
         this.boss.pos.set(this.boss.home.x, World.heightAt(this.boss.home.x, this.boss.home.z), this.boss.home.z);
-        this.bossActive = false; this.boss.dormant = true; this.boss.group.visible = false; UI.boss(null);
+        this.bossActive = false; this.boss.dormant = true; this.boss.rig.group.visible = false; UI.boss(null);
       }
       for (const pr of this.projectiles) this.scene.remove(pr.mesh);
       this.projectiles.length = 0;
       this.nova = null; this.novaMesh.visible = false;
       this.state = 'playing'; UI.hud(this.attrs, this.inv);
-      this.renderer.domElement.requestPointerLock(); this.clock.last = performance.now();
+      this.requestLookControl(); this.clock.last = performance.now();
       UI.toast('You wake at ' + this.checkpoint.name + '.', 'good');
     },
 
@@ -768,7 +822,7 @@
         case 'gate': {
           if (!this.prog.hasAllRelics()) { UI.toast('Three wardstones are required. You have ' + this.prog.relicCount() + '.', 'bad'); Audio.sfx('error'); return; }
           this.prog.unsealShrine(); this.openGateVisual();
-          this.boss.dormant = false; this.boss.group.visible = true;
+          this.boss.dormant = false; this.boss.rig.group.visible = true;
           this.spawnRingEffect(new T.Vector3(it.ref.x, World.heightAt(it.ref.x, it.ref.z), it.ref.z), 12, 0xc46bff, 1.2);
           this.save(false); break;
         }
@@ -781,7 +835,7 @@
       g.mesh.userData.barrier.visible = false; g.mesh.userData.runes.visible = false;
       if (g.collider) { this.world.grid.remove(g.collider); const i = this.world.colliders.indexOf(g.collider); if (i >= 0) this.world.colliders.splice(i, 1); g.collider = null; }
     },
-    closeLore() { UI.hide('lore'); this.state = 'playing'; this.renderer.domElement.requestPointerLock(); this.clock.last = performance.now(); },
+    closeLore() { UI.hide('lore'); this.state = 'playing'; this.requestLookControl(); this.clock.last = performance.now(); },
     triggerEnding() {
       this.state = 'ending'; document.exitPointerLock();
       this.prog.endingSeen = true; this.save(false);
@@ -794,7 +848,7 @@
         lore: Object.keys(this.prog.loreRead).length
       });
     },
-    afterEnding() { UI.hide('ending'); UI.show('hud'); this.state = 'playing'; this.renderer.domElement.requestPointerLock(); this.clock.last = performance.now(); Audio.setRegion(World.regionAt(this.p.pos.x, this.p.pos.z)); },
+    afterEnding() { UI.hide('ending'); UI.show('hud'); this.state = 'playing'; this.requestLookControl(); this.clock.last = performance.now(); Audio.setRegion(World.regionAt(this.p.pos.x, this.p.pos.z)); },
 
     // -------------------------------------------------------------- effects
     floatText(worldPos, text, kind) {
@@ -869,6 +923,12 @@
 
     updatePlayer(dt) {
       const P = CONFIG.player, p = this.p, a = this.attrs;
+      // Keyboard camera fallback (also useful when pointer lock is denied in an iframe).
+      const look = 2.1 * dt;
+      if (this.keys['arrowleft']) this.camYaw += look;
+      if (this.keys['arrowright']) this.camYaw -= look;
+      if (this.keys['arrowup']) this.camPitch = clamp(this.camPitch - look * 0.7, -0.55, 1.15);
+      if (this.keys['arrowdown']) this.camPitch = clamp(this.camPitch + look * 0.7, -0.55, 1.15);
       if (p.dodgeCd > 0) p.dodgeCd -= dt;
       const dir = this.moveDir();
       const moving = dir.lengthSq() > 0.01;
@@ -1368,10 +1428,10 @@
         const low = sorted[Math.floor(sorted.length * 0.01)] || avg;
         document.getElementById('fps').textContent = (1 / avg).toFixed(0) + ' fps · ' + (avg * 1000).toFixed(1) + ' ms · 1% low ' + (1 / low).toFixed(0);
       }
-      if (!this.world) return;
+      if (!this.world || !this.p || this.fatal) return;
       this.timeUniform.value += dt;
 
-      if (this.state === 'playing') {
+      if (this.state === 'playing' && !UI.openPanel) {
         if (this.slowmo > 0) { this.slowmo -= dt; if (this.slowmo <= 0) this.timeScale = 1; }
         const sdt = dt * this.timeScale;
         this.playtime += sdt;
@@ -1401,7 +1461,7 @@
       if (this.bossActive || !this.boss || !this.boss.alive || this.boss.dormant) return;
       const d = World.dist2(this.p.pos.x, this.p.pos.z, World.SHRINE[0], World.SHRINE[1]);
       if (d < 30 && this.prog.flags.shrineOpen) {
-        this.bossActive = true; this.boss.group.visible = true;
+        this.bossActive = true; this.boss.rig.group.visible = true;
         UI.boss(this.boss.hp, this.boss.maxHp, 1);
         Audio.sfx('bossRoar'); this.shake = 0.9;
         UI.toast('THE RUNEBOUND WARDEN', 'epic');
@@ -1421,20 +1481,32 @@
   // ------------------------------------------------------------------ boot
   root.WRGame = Game;
   function boot() {
-    UI.init(Game);
-    Game.init();
-    setTimeout(() => {
-      Game.buildWorld(CONFIG.world.seed);
-      Game.applyQuality(UI.settings.quality);
-      UI.loading(100, 'The lands are waiting.');
+    try {
+      UI.init(Game);
+      Game.init();
       setTimeout(() => {
-        const l = document.getElementById('loading');
-        l.classList.add('fadeOut');
-        setTimeout(() => l.classList.add('hidden'), 650);
-        UI.refreshMenu();
-        if (Game.playerRig) Game.playerRig.group.visible = false;
-      }, 420);
-    }, 60);
+        try {
+          Game.buildWorld(CONFIG.world.seed);
+          Game.applyQuality(UI.settings.quality);
+          UI.loading(100, 'The lands are waiting.');
+          setTimeout(() => {
+            const l = document.getElementById('loading');
+            l.classList.add('fadeOut');
+            setTimeout(() => l.classList.add('hidden'), 650);
+            UI.refreshMenu();
+            if (Game.playerRig) Game.playerRig.group.visible = false;
+          }, 420);
+        } catch (err) { showBootError(err); }
+      }, 60);
+    } catch (err) { showBootError(err); }
+  }
+  function showBootError(err) {
+    Game.fatal = err;
+    console.error('WILDRUNE boot failed:', err);
+    const tip = document.getElementById('loadTip');
+    if (tip) tip.textContent = 'The lands could not be raised: ' + (err && err.message ? err.message : String(err)) + '. Try a WebGL-capable browser or lower graphics quality.';
+    const bar = document.querySelector('#loadBar i');
+    if (bar) bar.style.background = '#c8434a';
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
   else boot();

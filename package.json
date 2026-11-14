@@ -1,0 +1,20 @@
+{
+  "name": "wildrune-web-prototype",
+  "version": "1.0.0",
+  "private": true,
+  "description": "WILDRUNE: The Forgotten Lands — self-contained browser action RPG prototype.",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "build": "node WebPrototype/tools/build.mjs",
+    "start": "node WebPrototype/tools/serve.mjs",
+    "dev": "node WebPrototype/tools/serve.mjs",
+    "test": "node WebPrototype/tests/run_tests.js && node WebPrototype/tests/build_tests.mjs",
+    "test:logic": "node WebPrototype/tests/run_tests.js",
+    "test:browser": "npm run build && node WebPrototype/tests/browser_smoke.mjs"
+  },
+  "devDependencies": {
+    "@sparticuz/chromium": "153.0.0",
+    "playwright-core": "1.65.1"
+  }
+}

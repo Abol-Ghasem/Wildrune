@@ -1,7 +1,15 @@
 /* WILDRUNE — automated logic tests. Run: node WebPrototype/tests/run_tests.js */
-'use strict';
-const path = require('path');
-const S = p => require(path.join(__dirname, '..', 'src', p));
+import { createRequire } from 'node:module';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+const require = createRequire(import.meta.url);
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// src files are UMD: in CJS they export via module.exports, in ESM (type:module) they attach to global WR.
+const S = p => {
+  const mod = require(path.join(__dirname, '..', 'src', p));
+  if (mod && Object.keys(mod).length) return mod;
+  return globalThis.WR || {};
+};
 const { CONFIG, ITEMS, RECIPES, ENEMIES, OBJECTIVES } = S('data.js');
 const { Inventory, Crafting } = S('inventory.js');
 const { inArc, AttackState, Attributes, useItem } = S('combat.js');
