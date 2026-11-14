@@ -25,11 +25,20 @@
 
     load(s) {
       if (!s || typeof s !== 'object') return;
-      this.completed = Object.assign({}, s.completed);
-      this.flags = Object.assign({}, s.flags);
-      this.relics = Object.assign({}, s.relics);
-      this.loreRead = Object.assign({}, s.loreRead);
-      this.gathered = Number(s.gathered) || 0;
+      const pick = (obj, allowed) => {
+        const out = {};
+        if (obj && typeof obj === 'object') for (const k of Object.keys(obj)) if (allowed.includes(k) && obj[k]) out[k] = true;
+        return out;
+      };
+      this.completed = pick(s.completed, OBJECTIVES.map(o => o.id));
+      this.flags = {};
+      if (s.flags && typeof s.flags === 'object') {
+        if (s.flags.shrineOpen) this.flags.shrineOpen = true;
+        if (s.flags.cacheOpened) this.flags.cacheOpened = true;
+      }
+      this.relics = pick(s.relics, ['relic_forest', 'relic_cave', 'relic_ruins']);
+      this.loreRead = pick(s.loreRead, ['lore1', 'lore2', 'lore3', 'lore4']);
+      const g = Number(s.gathered); this.gathered = Number.isFinite(g) ? Math.max(0, Math.floor(g)) : 0;
       this.craftedSalve = !!s.craftedSalve;
       this.bossDefeated = !!s.bossDefeated;
       this.endingSeen = !!s.endingSeen;
@@ -55,6 +64,7 @@
     hasAllRelics() { return this.relicCount() >= 3; }
 
     addRelic(id) {
+      if (!['relic_forest', 'relic_cave', 'relic_ruins'].includes(id)) return false;
       if (this.relics[id]) return false;
       this.relics[id] = true;
       this.emit({ type: 'relic', id, count: this.relicCount() });
@@ -62,6 +72,7 @@
       return true;
     }
     readLore(id) {
+      if (!['lore1', 'lore2', 'lore3', 'lore4'].includes(id)) return false;
       if (this.loreRead[id]) return false;
       this.loreRead[id] = true;
       this.emit({ type: 'lore', id });
@@ -136,21 +147,34 @@
       return { ok: true, data: SaveSystem.migrate(data) };
     },
     validate(d) {
-      if (!d || typeof d !== 'object') return { ok: false, error: 'not_object' };
-      if (typeof d.version !== 'number') return { ok: false, error: 'no_version' };
+      if (!d || typeof d !== 'object' || Array.isArray(d)) return { ok: false, error: 'not_object' };
+      if (typeof d.version !== 'number' || !Number.isFinite(d.version)) return { ok: false, error: 'no_version' };
       if (d.version > CONFIG.saveVersion) return { ok: false, error: 'future_version' };
       if (!d.player || typeof d.player.x !== 'number' || typeof d.player.z !== 'number') return { ok: false, error: 'bad_player' };
-      if (!d.inventory || typeof d.inventory !== 'object') return { ok: false, error: 'bad_inventory' };
-      if (!d.progression || typeof d.progression !== 'object') return { ok: false, error: 'bad_progression' };
       if (!Number.isFinite(d.player.x) || !Number.isFinite(d.player.z)) return { ok: false, error: 'nan_position' };
+      const half = CONFIG.world.size / 2;
+      if (Math.abs(d.player.x) > half || Math.abs(d.player.z) > half) return { ok: false, error: 'out_of_bounds' };
+      if (!d.inventory || typeof d.inventory !== 'object' || Array.isArray(d.inventory)) return { ok: false, error: 'bad_inventory' };
+      if (!d.progression || typeof d.progression !== 'object' || Array.isArray(d.progression)) return { ok: false, error: 'bad_progression' };
+      if (d.attrs != null && (typeof d.attrs !== 'object' || Array.isArray(d.attrs))) return { ok: false, error: 'bad_attrs' };
+      if (d.checkpoint != null) {
+        const c = d.checkpoint;
+        if (typeof c !== 'object' || !Number.isFinite(c.x) || !Number.isFinite(c.z) || Math.abs(c.x) > half || Math.abs(c.z) > half) return { ok: false, error: 'bad_checkpoint' };
+      }
+      if (d.world != null && (typeof d.world !== 'object' || Array.isArray(d.world))) return { ok: false, error: 'bad_world' };
       return { ok: true };
     },
     migrate(d) {
       const out = JSON.parse(JSON.stringify(d));
+      out.progression = out.progression || {};
       if (out.version < 2) { out.progression.loreRead = out.progression.loreRead || {}; out.version = 2; }
       if (out.version < 3) { out.world = out.world || {}; out.playtime = out.playtime || 0; out.version = 3; }
       out.attrs = out.attrs || {};
+      out.world = out.world || {};
+      out.world.nodesTaken = out.world.nodesTaken && typeof out.world.nodesTaken === 'object' ? out.world.nodesTaken : {};
+      out.playtime = Number.isFinite(Number(out.playtime)) ? Math.max(0, Number(out.playtime)) : 0;
       out.checkpoint = out.checkpoint || { x: 0, z: -150, name: 'Arrival Clearing' };
+      if (typeof out.checkpoint.name !== 'string') out.checkpoint.name = 'Waystone';
       return out;
     },
     exists(storage) { try { return !!storage.getItem(SAVE_KEY); } catch (e) { return false; } },
