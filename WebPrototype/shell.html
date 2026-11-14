@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WILDRUNE: The Forgotten Lands</title>
+<style>
+:root{
+  --gold:#e2c179; --gold-dim:#a8894c; --ink:#0c1210; --panel:rgba(12,18,16,.94);
+  --line:rgba(226,193,121,.28); --hp:#c8434a; --sp:#4fa86a; --text:#e8e6dd; --dim:#9aa79c;
+  --corrupt:#c46bff;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden;background:#05080a;color:var(--text);
+  font-family:ui-sans-serif,system-ui,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased;user-select:none}
+h1,h2,h3,.serif{font-family:Georgia,"Iowan Old Style","Times New Roman",serif;font-weight:600;letter-spacing:.02em}
+canvas{display:block;position:absolute;inset:0}
+#vignette{position:fixed;inset:0;pointer-events:none;z-index:5;
+  background:radial-gradient(ellipse at center,transparent 45%,rgba(0,0,0,.55) 100%)}
+#hurtFlash{position:fixed;inset:0;pointer-events:none;z-index:6;opacity:0;
+  background:radial-gradient(ellipse at center,transparent 35%,rgba(190,30,40,.75) 100%);transition:opacity .18s}
+#corruptFlash{position:fixed;inset:0;pointer-events:none;z-index:6;opacity:0;
+  background:radial-gradient(ellipse at center,transparent 40%,rgba(150,50,200,.5) 100%);transition:opacity .4s}
+.hidden{display:none!important}
+
+/* ---------- HUD ---------- */
+#hud{position:fixed;inset:0;pointer-events:none;z-index:10}
+#stats{position:absolute;left:22px;bottom:22px;width:290px}
+.bar{height:15px;background:rgba(0,0,0,.6);border:1px solid var(--line);border-radius:2px;
+  margin-bottom:7px;position:relative;overflow:hidden;box-shadow:0 2px 10px rgba(0,0,0,.5)}
+.bar>i{display:block;height:100%;width:100%;transition:width .16s ease-out;border-radius:1px}
+.bar>span{position:absolute;inset:0;font-size:10.5px;line-height:15px;text-align:center;
+  letter-spacing:.09em;text-shadow:0 1px 2px #000;color:#f2efe6}
+#hpFill{background:linear-gradient(180deg,#e0555c,#a32b32)}
+#spFill{background:linear-gradient(180deg,#63c883,#2f7a4a)}
+#spBar.low>i{animation:pulse .6s infinite alternate}
+@keyframes pulse{to{filter:brightness(1.6)}}
+#hotbar{position:absolute;left:22px;bottom:80px;display:flex;gap:7px}
+.slot{width:46px;height:46px;background:rgba(8,14,12,.8);border:1px solid var(--line);border-radius:3px;
+  position:relative;display:flex;align-items:center;justify-content:center}
+.slot .key{position:absolute;top:2px;left:4px;font-size:9px;color:var(--gold-dim)}
+.slot .qty{position:absolute;bottom:1px;right:4px;font-size:11px;font-weight:700;text-shadow:0 1px 2px #000}
+.slot.empty{opacity:.32}
+.slot svg{width:26px;height:26px}
+#objTrack{position:absolute;right:22px;top:22px;width:290px;text-align:right;
+  background:linear-gradient(270deg,rgba(8,14,12,.82),transparent);padding:12px 14px;border-right:2px solid var(--gold-dim)}
+#objTrack .lbl{font-size:10px;letter-spacing:.22em;color:var(--gold-dim);text-transform:uppercase}
+#objTrack .title{font-size:16px;margin:4px 0 3px;color:var(--gold)}
+#objTrack .desc{font-size:12px;color:var(--dim);line-height:1.45}
+#region{position:absolute;left:50%;top:26px;transform:translateX(-50%);text-align:center;
+  opacity:0;transition:opacity .8s}
+#region .n{font-size:26px;color:var(--gold);text-shadow:0 2px 14px #000;letter-spacing:.14em}
+#region .s{font-size:10.5px;letter-spacing:.34em;color:var(--dim);text-transform:uppercase;margin-top:3px}
+#prompt{position:absolute;left:50%;bottom:150px;transform:translateX(-50%);
+  background:rgba(8,14,12,.88);border:1px solid var(--line);padding:9px 18px;border-radius:3px;
+  font-size:13.5px;display:none;box-shadow:0 4px 20px rgba(0,0,0,.6)}
+#prompt b{color:var(--gold);border:1px solid var(--gold-dim);padding:1px 7px;border-radius:3px;margin-right:8px;font-size:12px}
+#gatherRing{position:absolute;left:50%;bottom:200px;transform:translateX(-50%);width:54px;height:54px;display:none}
+#bossbar{position:absolute;left:50%;top:70px;transform:translateX(-50%);width:min(620px,72vw);display:none;text-align:center}
+#bossbar .n{font-size:19px;color:var(--corrupt);letter-spacing:.16em;text-shadow:0 2px 12px #000;margin-bottom:6px}
+#bossbar .bar{height:17px;border-color:rgba(196,107,255,.45)}
+#bossFill{background:linear-gradient(180deg,#d17bff,#7a2fa8)}
+#bossPhase{font-size:10px;letter-spacing:.2em;color:var(--dim);margin-top:4px;text-transform:uppercase}
+#toasts{position:absolute;left:50%;top:96px;transform:translateX(-50%);display:flex;flex-direction:column;gap:7px;align-items:center}
+.toast{background:rgba(8,14,12,.92);border-left:3px solid var(--gold);padding:9px 18px;font-size:13px;
+  border-radius:2px;animation:tin .3s ease-out;box-shadow:0 4px 18px rgba(0,0,0,.6);white-space:nowrap}
+.toast.good{border-left-color:#5fc87f}.toast.bad{border-left-color:#c8434a}.toast.epic{border-left-color:var(--corrupt)}
+@keyframes tin{from{opacity:0;transform:translateY(-12px)}}
+#dmgLayer{position:fixed;inset:0;pointer-events:none;z-index:11;overflow:hidden}
+.dmg{position:absolute;font-weight:800;font-size:19px;text-shadow:0 2px 5px #000;animation:dmgUp .85s ease-out forwards}
+.dmg.crit{font-size:26px;color:#ffd479}
+.dmg.player{color:#ff6b72}
+.dmg.heal{color:#7ce89a}
+@keyframes dmgUp{0%{opacity:0;transform:translateY(0) scale(.7)}18%{opacity:1;transform:translateY(-14px) scale(1.12)}100%{opacity:0;transform:translateY(-62px) scale(.95)}}
+#crosshair{position:absolute;left:50%;top:50%;width:5px;height:5px;margin:-2.5px;border-radius:50%;
+  background:rgba(255,255,255,.5);box-shadow:0 0 5px rgba(0,0,0,.9)}
+#fps{position:absolute;right:12px;bottom:10px;font-size:11px;color:var(--dim);font-variant-numeric:tabular-nums}
+
+/* ---------- Panels ---------- */
+.panel{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:min(880px,92vw);
+  max-height:82vh;background:var(--panel);border:1px solid var(--line);border-radius:5px;z-index:30;
+  display:flex;flex-direction:column;box-shadow:0 24px 70px rgba(0,0,0,.8);backdrop-filter:blur(3px)}
+.panel header{display:flex;align-items:center;justify-content:space-between;padding:15px 22px;border-bottom:1px solid var(--line)}
+.panel header h2{font-size:20px;color:var(--gold);letter-spacing:.08em}
+.panel .body{padding:18px 22px;overflow-y:auto;flex:1}
+.panel footer{padding:11px 22px;border-top:1px solid var(--line);font-size:11.5px;color:var(--dim);display:flex;justify-content:space-between}
+.x{background:none;border:1px solid var(--line);color:var(--dim);width:29px;height:29px;border-radius:3px;cursor:pointer;font-size:16px;line-height:1}
+.x:hover{color:var(--gold);border-color:var(--gold)}
+.tabs{display:flex;gap:6px;padding:0 22px;margin-top:12px}
+.tab{background:none;border:1px solid transparent;border-bottom:2px solid transparent;color:var(--dim);
+  padding:7px 15px;cursor:pointer;font-size:12.5px;letter-spacing:.06em}
+.tab.on{color:var(--gold);border-bottom-color:var(--gold)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(158px,1fr));gap:11px}
+.card{background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.08);border-radius:4px;padding:12px;
+  display:flex;flex-direction:column;gap:6px;transition:.15s;position:relative}
+.card:hover{border-color:var(--line);background:rgba(226,193,121,.07)}
+.card .top{display:flex;align-items:center;gap:9px}
+.card svg{width:30px;height:30px;flex-shrink:0}
+.card .nm{font-size:13.5px;color:#f0ece0;line-height:1.25}
+.card .qt{font-size:11px;color:var(--gold-dim);font-weight:700}
+.card .ds{font-size:11.5px;color:var(--dim);line-height:1.45;flex:1}
+.card .type{position:absolute;top:8px;right:9px;font-size:8.5px;letter-spacing:.13em;color:var(--gold-dim);text-transform:uppercase}
+.btn{background:linear-gradient(180deg,rgba(226,193,121,.18),rgba(226,193,121,.07));
+  border:1px solid var(--gold-dim);color:var(--gold);padding:7px 14px;border-radius:3px;cursor:pointer;
+  font-size:12px;letter-spacing:.07em;transition:.15s;font-family:inherit}
+.btn:hover:not(:disabled){background:rgba(226,193,121,.3);color:#fff5dd}
+.btn:disabled{opacity:.35;cursor:not-allowed}
+.btn.wide{width:100%;padding:11px}
+.btn.big{padding:13px 26px;font-size:14px}
+.btn.ghost{background:none;border-color:rgba(255,255,255,.16);color:var(--dim)}
+.btn.ghost:hover{border-color:var(--line);color:var(--gold)}
+.reqs{display:flex;flex-wrap:wrap;gap:5px;margin-top:2px}
+.req{font-size:10.5px;padding:2px 7px;border-radius:2px;background:rgba(95,200,127,.14);color:#8fdca6;border:1px solid rgba(95,200,127,.25)}
+.req.miss{background:rgba(200,67,74,.14);color:#e88a90;border-color:rgba(200,67,74,.3)}
+.empty-note{color:var(--dim);font-size:13px;text-align:center;padding:36px 0;font-style:italic}
+.jrow{display:flex;gap:13px;padding:12px 4px;border-bottom:1px solid rgba(255,255,255,.06)}
+.jrow .mark{width:20px;height:20px;border:1px solid var(--gold-dim);border-radius:50%;flex-shrink:0;margin-top:2px;
+  display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--gold)}
+.jrow.done{opacity:.5}.jrow.done .mark{background:var(--gold-dim);color:#0c1210}
+.jrow.active .mark{border-color:var(--gold);box-shadow:0 0 10px rgba(226,193,121,.5)}
+.jrow .jt{font-size:14.5px;color:#f0ece0}.jrow.active .jt{color:var(--gold)}
+.jrow .jd{font-size:12px;color:var(--dim);margin-top:3px;line-height:1.45}
+.jrow .kind{font-size:9px;letter-spacing:.15em;color:var(--gold-dim);text-transform:uppercase;margin-top:4px}
+
+/* ---------- Screens ---------- */
+.screen{position:fixed;inset:0;z-index:40;display:flex;align-items:center;justify-content:center;
+  background:radial-gradient(ellipse at 50% 40%,#16241d 0%,#070b0a 70%)}
+.screen .inner{text-align:center;max-width:640px;padding:34px}
+#menu{background:radial-gradient(ellipse at 50% 30%,#1b2f26 0%,#060a09 72%)}
+#menu h1{font-size:clamp(40px,7.4vw,74px);color:var(--gold);letter-spacing:.19em;text-shadow:0 4px 40px rgba(226,193,121,.28)}
+#menu .sub{font-size:clamp(12px,1.7vw,16px);letter-spacing:.52em;color:var(--dim);text-transform:uppercase;margin:10px 0 6px}
+#menu .tag{font-size:13.5px;color:#8fa093;font-style:italic;margin:20px 0 34px;line-height:1.7}
+.menuBtns{display:flex;flex-direction:column;gap:10px;width:290px;margin:0 auto}
+.rule{width:180px;height:1px;background:linear-gradient(90deg,transparent,var(--gold-dim),transparent);margin:22px auto}
+#saveInfo{font-size:11.5px;color:var(--dim);margin-top:18px;line-height:1.7}
+#death{background:radial-gradient(ellipse at center,#2a1013 0%,#05070a 72%)}
+#death h1{font-size:56px;color:#c8434a;letter-spacing:.2em}
+#ending{background:radial-gradient(ellipse at center,#1d1230 0%,#05070a 72%)}
+#ending h1{font-size:52px;color:var(--corrupt);letter-spacing:.16em}
+#ending .story{font-size:15px;line-height:1.95;color:#cfc6dd;font-style:italic;margin:26px 0}
+.statgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin:24px 0;text-align:left}
+.statgrid div{background:rgba(255,255,255,.04);padding:11px 15px;border-radius:3px;border-left:2px solid var(--gold-dim)}
+.statgrid b{display:block;font-size:19px;color:var(--gold)}
+.statgrid span{font-size:10.5px;letter-spacing:.13em;color:var(--dim);text-transform:uppercase}
+#pause .inner,#settings .inner{background:var(--panel);border:1px solid var(--line);border-radius:5px;padding:32px 40px;min-width:420px}
+#pause,#settings{background:rgba(4,7,6,.82);backdrop-filter:blur(5px)}
+.setrow{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:12px 0;border-bottom:1px solid rgba(255,255,255,.06)}
+.setrow label{font-size:13px;color:#ddd8cc}
+.setrow .hint{font-size:11px;color:var(--dim);margin-top:2px}
+input[type=range]{width:170px;accent-color:var(--gold)}
+select{background:#121a17;color:var(--text);border:1px solid var(--line);padding:6px 10px;border-radius:3px;font-family:inherit;font-size:12.5px}
+.keys{display:grid;grid-template-columns:repeat(2,1fr);gap:9px 26px;text-align:left;margin-top:8px}
+.keys div{display:flex;justify-content:space-between;font-size:12.5px;color:var(--dim);padding:4px 0;border-bottom:1px solid rgba(255,255,255,.05)}
+.keys b{color:var(--gold);font-weight:600}
+#lore .inner{background:var(--panel);border:1px solid var(--line);border-radius:5px;padding:38px 44px;max-width:600px}
+#lore h2{color:var(--gold);font-size:23px;margin-bottom:18px}
+#lore .txt{font-size:15.5px;line-height:2;font-style:italic;color:#d6d2c4}
+#loading{background:#060a09;flex-direction:column;gap:22px}
+#loading .t{font-size:32px;color:var(--gold);letter-spacing:.22em}
+#loadBar{width:280px;height:3px;background:rgba(255,255,255,.1);border-radius:2px;overflow:hidden}
+#loadBar i{display:block;height:100%;width:0;background:var(--gold);transition:width .3s}
+#loadTip{font-size:12.5px;color:var(--dim);font-style:italic;max-width:420px;text-align:center;line-height:1.7}
+.fadeOut{animation:fo .6s forwards}@keyframes fo{to{opacity:0;visibility:hidden}}
+#hint{position:absolute;left:50%;bottom:22px;transform:translateX(-50%);font-size:11.5px;color:rgba(255,255,255,.34);letter-spacing:.05em}
+@media(max-width:760px){#objTrack{width:210px}#stats{width:210px}.panel{width:96vw}}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="vignette"></div><div id="hurtFlash"></div><div id="corruptFlash"></div>
+
+<div id="hud" class="hidden">
+  <div id="crosshair"></div>
+  <div id="region"><div class="n"></div><div class="s">Forgotten Lands</div></div>
+  <div id="objTrack"><div class="lbl">Objective</div><div class="title"></div><div class="desc"></div></div>
+  <div id="bossbar"><div class="n">The Runebound Warden</div><div class="bar"><i id="bossFill"></i></div><div id="bossPhase">Phase I</div></div>
+  <div id="toasts"></div>
+  <div id="hotbar"></div>
+  <div id="stats">
+    <div class="bar"><i id="hpFill"></i><span id="hpText">100 / 100</span></div>
+    <div class="bar" id="spBar"><i id="spFill"></i><span id="spText">100 / 100</span></div>
+  </div>
+  <div id="prompt"><b>E</b><span></span></div>
+  <svg id="gatherRing" viewBox="0 0 54 54"><circle cx="27" cy="27" r="23" fill="none" stroke="rgba(0,0,0,.6)" stroke-width="5"/><circle id="gatherArc" cx="27" cy="27" r="23" fill="none" stroke="#e2c179" stroke-width="5" stroke-linecap="round" stroke-dasharray="144.5" stroke-dashoffset="144.5" transform="rotate(-90 27 27)"/></svg>
+  <div id="hint">WASD move · Shift sprint · Space jump · Ctrl dodge · LMB attack · RMB heavy · E interact</div>
+  <div id="fps"></div>
+</div>
+<div id="dmgLayer"></div>
+
+<div id="inventory" class="panel hidden">
+  <header><h2>Satchel</h2><button class="x" data-close>&times;</button></header>
+  <div class="body"><div id="invGrid" class="grid"></div></div>
+  <footer><span id="invCount"></span><span>Click an item to use it · I to close</span></footer>
+</div>
+
+<div id="crafting" class="panel hidden">
+  <header><h2>Crafting</h2><button class="x" data-close>&times;</button></header>
+  <div class="tabs" id="craftTabs"></div>
+  <div class="body"><div id="craftGrid" class="grid"></div></div>
+  <footer><span id="stationNote"></span><span>C to close</span></footer>
+</div>
+
+<div id="journal" class="panel hidden">
+  <header><h2>Journal</h2><button class="x" data-close>&times;</button></header>
+  <div class="body"><div id="journalList"></div></div>
+  <footer><span id="journalPct"></span><span>J to close</span></footer>
+</div>
+
+<div id="lore" class="screen hidden"><div class="inner">
+  <h2 id="loreTitle"></h2><div class="txt" id="loreText"></div>
+  <div class="rule"></div><button class="btn big" id="loreClose">Close the memory</button>
+</div></div>
+
+<div id="menu" class="screen"><div class="inner">
+  <h1>WILDRUNE</h1><div class="sub">The Forgotten Lands</div>
+  <div class="rule"></div>
+  <div class="tag">The wardstones failed. The forest remembers what walked out.<br>You are the only one who came back in.</div>
+  <div class="menuBtns">
+    <button class="btn big wide" id="btnNew">Begin the Descent</button>
+    <button class="btn wide" id="btnContinue">Continue</button>
+    <button class="btn ghost wide" id="btnSettings">Settings</button>
+    <button class="btn ghost wide" id="btnControls">Controls</button>
+  </div>
+  <div id="saveInfo"></div>
+</div></div>
+
+<div id="pause" class="screen hidden"><div class="inner">
+  <h2 style="color:var(--gold);font-size:26px;letter-spacing:.14em;margin-bottom:6px">Paused</h2>
+  <div class="rule"></div>
+  <div class="menuBtns">
+    <button class="btn big wide" id="btnResume">Resume</button>
+    <button class="btn wide" id="btnSave">Save Progress</button>
+    <button class="btn ghost wide" id="btnSettings2">Settings</button>
+    <button class="btn ghost wide" id="btnControls2">Controls</button>
+    <button class="btn ghost wide" id="btnQuit">Return to Menu</button>
+  </div>
+  <div id="pauseInfo" style="font-size:11.5px;color:var(--dim);margin-top:16px"></div>
+</div></div>
+
+<div id="settings" class="screen hidden"><div class="inner">
+  <h2 style="color:var(--gold);font-size:23px;margin-bottom:14px">Settings</h2>
+  <div class="setrow"><label>Mouse sensitivity<div class="hint">Camera turn speed</div></label><input type="range" id="setSens" min="0.3" max="3" step="0.1"></div>
+  <div class="setrow"><label>Invert vertical axis</label><input type="checkbox" id="setInvert"></div>
+  <div class="setrow"><label>Graphics quality<div class="hint">Shadows, foliage density, resolution</div></label>
+    <select id="setQuality"><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></div>
+  <div class="setrow"><label>Master volume</label><input type="range" id="setVol" min="0" max="1" step="0.05"></div>
+  <div class="setrow"><label>Ambience volume</label><input type="range" id="setMusic" min="0" max="1" step="0.05"></div>
+  <div class="setrow"><label>Damage numbers</label><input type="checkbox" id="setDmg" checked></div>
+  <div class="setrow"><label>Show FPS counter</label><input type="checkbox" id="setFps"></div>
+  <div class="rule"></div>
+  <button class="btn big" id="btnSettingsBack">Back</button>
+</div></div>
+
+<div id="controls" class="screen hidden"><div class="inner">
+  <h2 style="color:var(--gold);font-size:23px;margin-bottom:14px">Controls</h2>
+  <div class="keys">
+    <div><span>Move</span><b>W A S D</b></div><div><span>Look</span><b>Mouse</b></div>
+    <div><span>Sprint</span><b>Shift</b></div><div><span>Jump</span><b>Space</b></div>
+    <div><span>Dodge roll</span><b>Ctrl / Alt</b></div><div><span>Light attack</span><b>Left Mouse</b></div>
+    <div><span>Heavy attack</span><b>Right Mouse</b></div><div><span>Interact / gather</span><b>E</b></div>
+    <div><span>Satchel</span><b>I</b></div><div><span>Crafting</span><b>C</b></div>
+    <div><span>Journal</span><b>J</b></div><div><span>Quick heal</span><b>Q</b></div>
+    <div><span>Use slot 1–4</span><b>1 2 3 4</b></div><div><span>Pause</span><b>Esc</b></div>
+  </div>
+  <div class="rule"></div>
+  <div style="font-size:12px;color:var(--dim);line-height:1.8;max-width:460px">
+    Dodging grants brief invulnerability — roll <i>through</i> attacks, not away from them.<br>
+    Heavy attacks stagger. Watch for the red glow: every enemy telegraphs before it strikes.
+  </div>
+  <div class="rule"></div><button class="btn big" id="btnControlsBack">Back</button>
+</div></div>
+
+<div id="death" class="screen hidden"><div class="inner">
+  <h1>FALLEN</h1>
+  <div class="rule"></div>
+  <div style="color:var(--dim);font-size:14px;line-height:1.8;margin-bottom:8px" id="deathMsg">The land takes you back to the last waystone.</div>
+  <div id="deathCount" style="color:var(--gold);font-size:15px;margin:18px 0"></div>
+  <button class="btn big" id="btnRespawn">Return to Waystone</button>
+</div></div>
+
+<div id="ending" class="screen hidden"><div class="inner">
+  <h1>THE DOOR IS SHUT</h1>
+  <div class="story" id="endStory"></div>
+  <div class="statgrid" id="endStats"></div>
+  <div class="menuBtns">
+    <button class="btn big wide" id="btnEndContinue">Walk the Lands Again</button>
+    <button class="btn ghost wide" id="btnEndMenu">Return to Menu</button>
+  </div>
+</div></div>
+
+<div id="loading" class="screen"><div class="inner" style="display:flex;flex-direction:column;align-items:center;gap:20px">
+  <div class="t serif">WILDRUNE</div>
+  <div id="loadBar"><i></i></div>
+  <div id="loadTip">Growing the forest…</div>
+</div></div>
+
+<script>{{VENDOR}}</script>
+<script>{{GAME}}</script>
+</body>
+</html>
